@@ -73,6 +73,10 @@ def chat(
         "messages": messages,
         "max_tokens": max_tokens,
         "stream": False,
+        # 关闭思考模式：DeepSeek 在思考模式下忽略 temperature，结果每次都会变。
+        # 结论只依据证据，用 temperature 0 换稳定性。
+        "thinking": {"type": "disabled"},
+        "temperature": 0,
     }
     if json_mode:
         payload["response_format"] = {"type": "json_object"}

@@ -158,6 +158,7 @@ def make_handler(config: Dict[str, Any], jobs: JobStore, limiter: RateLimiter):
             try:
                 body = json.loads(self.rfile.read(length).decode("utf-8"))
                 question = str(body.get("question") or "")
+                refresh = body.get("refresh") is True
             except (ValueError, UnicodeDecodeError, AttributeError):
                 self._json(400, {"error": "请求内容无效"})
                 return
@@ -172,7 +173,7 @@ def make_handler(config: Dict[str, Any], jobs: JobStore, limiter: RateLimiter):
 
             def work() -> None:
                 try:
-                    result = detective.investigate(config, question, progress=progress)
+                    result = detective.investigate(config, question, progress=progress, refresh=refresh)
                     jobs.update(job_id, state="done", stage="done", message="完成", result=result)
                 except detective.DetectiveError as exc:
                     jobs.update(job_id, state="error", error=str(exc))

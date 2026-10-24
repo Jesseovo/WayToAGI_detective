@@ -266,7 +266,10 @@ def _run_detect(args, config: dict, question: str) -> int:
         sys.stderr.flush()
 
     try:
-        result = detective.investigate(config, question, progress=progress)
+        result = detective.investigate(
+            config, question, progress=progress,
+            use_cache=not args.no_cache, refresh=args.refresh,
+        )
     except detective.DetectiveError as exc:
         print(f"错误: {exc}", file=sys.stderr)
         return 1
@@ -285,6 +288,8 @@ def _run_detect(args, config: dict, question: str) -> int:
     for note in result["notes"]:
         lines.append(f"提示：{note}")
     lines.append(f"查询时间 {result['checked_at']} · 元宝搜索调用 {result['search_calls']} 次")
+    if result.get("from_cache"):
+        lines.append(f"（缓存结果，约 {result['cache_age_minutes']} 分钟前；--refresh 可重新查询）")
     print("\n".join(lines))
     return 0
 

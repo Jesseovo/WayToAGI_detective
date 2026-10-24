@@ -259,6 +259,101 @@ def test_question_length_and_empty_checks():
         detective.investigate(CONFIG, "x" * 500)
 
 
+def test_llm_payload_disables_thinking_and_pins_temperature():
+    seen = {}
+
+    def fake_post(url, payload, headers=None, **kw):
+        seen.update(payload)
+        return {"choices": [{"message": {"content": "{}"}}]}
+
+    with patch.object(http, "post", side_effect=fake_post):
+        llm.chat(CONFIG, [{"role": "user", "content": "json"}])
+    assert seen["thinking"] == {"type": "disabled"}
+    assert seen["temperature"] == 0
+
+
+def test_evidence_order_is_stable_regardless_of_search_order():
+    a = page("A", "https://a.example.com/1", authority=3)
+    b = page("B", "https://b.example.com/1", authority=3)
+    sub = [{"question": "q", "query": "q", "fresh": False}]
+    orders = []
+    for pages in ([a, b], [b, a]):
+        with patch.object(yuanbao, "search_pro", side_effect=fake_search_pro({"q": pages})):
+            ev = detective.gather_evidence(CONFIG, [dict(s) for s in sub], detective._Counter())
+        orders.append([(e["id"], e["url"]) for e in ev])
+    assert orders[0] == orders[1]
+
+
+def test_evidence_found_by_more_sub_questions_ranks_higher():
+    shared = page("共同", "https://z.example.com/shared", authority=2)
+    single = page("单个", "https://a.example.com/single", authority=2)
+    subs = [{"question": "q1", "query": "q1", "fresh": False}, {"question": "q2", "query": "q2", "fresh": False}]
+    with patch.object(yuanbao, "search_pro", side_effect=fake_search_pro({"q1": [single, shared], "q2": [shared]})):
+        ev = detective.gather_evidence(CONFIG, subs, detective._Counter())
+    assert ev[0]["url"] == "https://z.example.com/shared"
+
+
+@pytest.fixture
+def isolated_cache(tmp_path, monkeypatch):
+    from lib import cache
+    monkeypatch.setenv("LAST30DAYS_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
+    return tmp_path
+
+
+def _fake_fresh(verdict="假"):
+    calls = {"n": 0}
+
+    def run(config, question, progress, with_cross_check):
+        calls["n"] += 1
+        return {"question": question, "verdict": verdict, "search_calls": 3, "checked_at": "2026-10-24 16:00"}
+    return run, calls
+
+
+def test_cache_hit_skips_search_and_normalizes_question(isolated_cache):
+    run, calls = _fake_fresh()
+    with patch.object(detective, "_investigate_fresh", side_effect=run):
+        first = detective.investigate(CONFIG, "隔夜开水能喝吗？")
+        second = detective.investigate(CONFIG, " 隔夜开水 能喝吗 ")
+    assert calls["n"] == 1
+    assert first["from_cache"] is False
+    assert second["from_cache"] is True and second["verdict"] == "假"
+
+
+def test_refresh_bypasses_and_overwrites_cache(isolated_cache):
+    run, calls = _fake_fresh("假")
+    with patch.object(detective, "_investigate_fresh", side_effect=run):
+        detective.investigate(CONFIG, "问题甲")
+    run2, calls2 = _fake_fresh("说不准")
+    with patch.object(detective, "_investigate_fresh", side_effect=run2):
+        refreshed = detective.investigate(CONFIG, "问题甲", refresh=True)
+        again = detective.investigate(CONFIG, "问题甲")
+    assert calls2["n"] == 1
+    assert refreshed["from_cache"] is False and refreshed["verdict"] == "说不准"
+    assert again["from_cache"] is True and again["verdict"] == "说不准"
+
+
+def test_errors_are_not_cached(isolated_cache):
+    def boom(*a, **kw):
+        raise detective.DetectiveError("元宝搜索调用失败")
+    with patch.object(detective, "_investigate_fresh", side_effect=boom):
+        with pytest.raises(detective.DetectiveError):
+            detective.investigate(CONFIG, "问题乙")
+    run, calls = _fake_fresh()
+    with patch.object(detective, "_investigate_fresh", side_effect=run):
+        detective.investigate(CONFIG, "问题乙")
+    assert calls["n"] == 1
+
+
+def test_use_cache_false_never_reads_or_writes(isolated_cache):
+    run, calls = _fake_fresh()
+    with patch.object(detective, "_investigate_fresh", side_effect=run):
+        detective.investigate(CONFIG, "问题丙", use_cache=False)
+        detective.investigate(CONFIG, "问题丙", use_cache=False)
+    assert calls["n"] == 2
+    assert list(isolated_cache.glob("*.json")) == []
+
+
 # --- 网页 ------------------------------------------------------------------
 
 @pytest.fixture

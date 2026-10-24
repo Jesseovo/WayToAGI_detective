@@ -134,6 +134,14 @@
 
     (data.notes || []).forEach(function (n) { card.appendChild(el("p", "note", "提示:" + n)); });
     card.appendChild(el("p", "meta", "查询时间 " + data.checked_at + " · 元宝搜索调用 " + data.search_calls + " 次"));
+    if (data.from_cache) {
+      var cacheLine = el("p", "meta", "这是 " + data.cache_age_minutes + " 分钟前的查询结果。 ");
+      var again = el("button", "linkish", "重新查询");
+      again.type = "button";
+      again.addEventListener("click", function () { start(data.question, true); });
+      cacheLine.appendChild(again);
+      card.appendChild(cacheLine);
+    }
     result.appendChild(card);
   }
 
@@ -158,7 +166,7 @@
     }).catch(function () { finish(); showError("连接中断了,请重试"); });
   }
 
-  function start(question) {
+  function start(question, refresh) {
     errorBox.hidden = true;
     result.textContent = "";
     go.disabled = true;
@@ -166,7 +174,7 @@
     fetch("/api/check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: question })
+      body: JSON.stringify({ question: question, refresh: refresh === true })
     }).then(function (r) {
       return r.json().then(function (body) { return { ok: r.ok, body: body }; });
     }).then(function (res) {

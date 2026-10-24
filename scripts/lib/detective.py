@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from . import dates, http, llm, yuanbao
+from . import cache, dates, http, llm, yuanbao
 
 VERDICTS = ("真", "假", "说不准", "没查到可靠来源")
 MAX_QUESTION_CHARS = 200
@@ -30,6 +30,15 @@ CROSS_CHECK_SOURCES = ("weibo", "zhihu", "wechat", "baidu", "toutiao")
 CROSS_CHECK_PER_SOURCE = 3
 FOLK_MIN_RELEVANCE = 0.05
 MAX_CANDIDATES = 5
+CACHE_TTL_HOURS = 6
+# 改了提示词或结果结构就递增，旧缓存自动失效
+CACHE_VERSION = "v1"
+
+
+def _cache_key(question: str) -> str:
+    # 忽略大小写和标点空白差异，让「隔夜开水能喝吗？」和「隔夜开水能喝吗」命中同一份结果
+    normalized = re.sub(r"[\s\W_]+", "", question.lower())
+    return cache.get_cache_key(f"detect:{CACHE_VERSION}:{normalized}", "", "", "detective")
 
 ProgressFn = Callable[[str, str], None]
 
@@ -182,10 +191,13 @@ def gather_evidence(
             merged[url] = entry
 
     def rank(item):
+        # 分数取 3 位小数，避免浮点尾数抖动打乱顺序；最后按链接排，保证同分时顺序固定
         return (
             -(item.get("authority") or 0),
-            -(item.get("api_score") or 0.0),
+            -len(item.get("queries") or []),
+            -round(item.get("api_score") or 0.0, 3),
             -int((item.get("date") or "0000-00-00").replace("-", "")),
+            item["url"],
         )
 
     ordered = sorted(merged.values(), key=rank)[:MAX_EVIDENCE]
@@ -381,13 +393,40 @@ def investigate(
     question: str,
     progress: ProgressFn = _noop,
     with_cross_check: bool = True,
+    use_cache: bool = True,
+    refresh: bool = False,
 ) -> Dict[str, Any]:
+    """完整调查。``use_cache`` 时同一问题在 CACHE_TTL_HOURS 内直接返回上次结果；
+    ``refresh`` 忽略已有缓存重新查询，并用新结果覆盖缓存。"""
     question = re.sub(r"\s+", " ", question or "").strip()
     if not question:
         raise DetectiveError("请先输入要查证的内容")
     if len(question) > MAX_QUESTION_CHARS:
         raise DetectiveError(f"内容太长，请控制在 {MAX_QUESTION_CHARS} 字以内")
 
+    key = _cache_key(question)
+    if use_cache and not refresh:
+        cached, age_hours = cache.load_cache_with_age(key, ttl_hours=CACHE_TTL_HOURS)
+        if isinstance(cached, dict) and cached.get("verdict") in VERDICTS:
+            cached["from_cache"] = True
+            cached["cache_age_minutes"] = int(round((age_hours or 0) * 60))
+            progress("done", "使用缓存结果")
+            return cached
+
+    result = _investigate_fresh(config, question, progress, with_cross_check)
+    if use_cache:
+        cache.save_cache(key, result)
+    result["from_cache"] = False
+    result["cache_age_minutes"] = 0
+    return result
+
+
+def _investigate_fresh(
+    config: Dict[str, Any],
+    question: str,
+    progress: ProgressFn,
+    with_cross_check: bool,
+) -> Dict[str, Any]:
     calls = _Counter()
 
     progress("decompose", "正在拆解问题…")
