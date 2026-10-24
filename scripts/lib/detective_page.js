@@ -26,7 +26,7 @@
   }
 
   function link(url, text) {
-    var a = el("a", null, text || url);
+    var a = el("a", "source-link", text || url);
     a.href = safeHref(url);
     a.target = "_blank";
     a.rel = "noopener noreferrer nofollow";
@@ -34,83 +34,91 @@
   }
 
   function section(title) {
-    return el("h2", null, title);
+    return el("h2", "content-section", title);
   }
 
   function sourceLine(s) {
-    var li = el("li");
+    var li = el("li", "source-item");
     li.appendChild(link(s.url, s.title || s.url));
     var bits = [s.site, s.date].filter(Boolean).join(" · ");
-    if (bits) li.appendChild(el("span", "meta", "  " + bits));
+    if (bits) li.appendChild(el("span", "meta source-meta", bits));
     return li;
   }
 
   function render(data) {
     result.textContent = "";
-    var card = el("div", "card");
-    card.appendChild(el("span", "badge v-" + data.verdict, data.verdict));
-    card.appendChild(el("div", "claim", data.claim || data.question));
-    if (data.reasoning) card.appendChild(el("p", "reason", data.reasoning));
+    var card = el("div", "card result-card");
+    var head = el("div", "result-head");
+    var summary = el("div", "result-summary");
+    summary.appendChild(el("p", "result-kicker", "查证结果"));
+    summary.appendChild(el("div", "claim", data.claim || data.question));
+    if (data.reasoning) summary.appendChild(el("p", "reason", data.reasoning));
+    head.appendChild(summary);
+    var verdict = el("div", "verdict-wrap");
+    verdict.appendChild(el("span", "badge v-" + data.verdict, data.verdict));
+    head.appendChild(verdict);
+    card.appendChild(head);
+    var body = el("div", "result-body");
 
     if (data.claims && data.claims.length) {
-      card.appendChild(section("关键说法与依据"));
-      var ul = el("ul");
+      body.appendChild(section("关键说法与依据"));
+      var ul = el("ul", "claim-list");
       data.claims.forEach(function (c) {
         var li = el("li", null, c.text);
-        var inner = el("ul");
+        var inner = el("ul", "source-list");
         (c.sources || []).forEach(function (s) { inner.appendChild(sourceLine(s)); });
         if (inner.childNodes.length) li.appendChild(inner);
         ul.appendChild(li);
       });
-      card.appendChild(ul);
+      body.appendChild(ul);
     }
 
     if (data.candidates && data.candidates.length) {
-      card.appendChild(section("可能的答案"));
-      var cul = el("ul");
+      body.appendChild(section("可能的答案"));
+      var cul = el("ul", "candidate-list");
       data.candidates.forEach(function (c) {
         var li = el("li");
         li.appendChild(el("strong", null, c.name));
         if (c.why) li.appendChild(el("span", null, " — " + c.why));
-        var inner = el("ul");
+        var inner = el("ul", "source-list");
         (c.sources || []).forEach(function (s) { inner.appendChild(sourceLine(s)); });
         if (inner.childNodes.length) li.appendChild(inner);
         cul.appendChild(li);
       });
-      card.appendChild(cul);
+      body.appendChild(cul);
     }
 
     if (data.conflicts && data.conflicts.length) {
-      card.appendChild(section("来源之间的分歧"));
+      body.appendChild(section("来源之间的分歧"));
       data.conflicts.forEach(function (c) {
         var box = el("div", "conflict");
         box.appendChild(el("div", null, c.summary));
         if (c.basis) box.appendChild(el("div", "meta", "判断依据:" + c.basis));
-        card.appendChild(box);
+        body.appendChild(box);
       });
     }
 
     if (data.verdict === "没查到可靠来源") {
-      card.appendChild(el("p", "note", "没有找到足够可靠的来源,所以不下判断。换个说法或补充细节再试一次。"));
+      body.appendChild(el("p", "note", "没有找到足够可靠的来源，所以不下判断。换个说法或补充细节再试一次。"));
     }
 
     if (data.evidence && data.evidence.length) {
       var d1 = el("details");
       d1.appendChild(el("summary", null, "查到的全部来源(" + data.evidence.length + ")"));
-      var ul2 = el("ul");
+      var ul2 = el("ul", "source-list");
       data.evidence.forEach(function (e) {
         var li = sourceLine(e);
         li.insertBefore(el("span", "meta", e.id + " "), li.firstChild);
         ul2.appendChild(li);
       });
       d1.appendChild(ul2);
-      card.appendChild(d1);
+      body.appendChild(d1);
     }
 
     if (data.folk && data.folk.length) {
       var d2 = el("details");
       d2.appendChild(el("summary", null, "各平台上的民间讨论(只说明传到了哪里,不作为依据)"));
-      var ul3 = el("ul");
+      var ul3 = el("ul", "source-list");
       data.folk.forEach(function (f) {
         var li = el("li");
         li.appendChild(el("span", "meta", f.platform + " · "));
@@ -118,7 +126,7 @@
         ul3.appendChild(li);
       });
       d2.appendChild(ul3);
-      card.appendChild(d2);
+      body.appendChild(d2);
     }
 
     if (data.sub_questions && data.sub_questions.length) {
@@ -129,19 +137,22 @@
         ul4.appendChild(el("li", null, s.question + "(搜索词:" + s.query + ",查到 " + s.result_count + " 条)"));
       });
       d3.appendChild(ul4);
-      card.appendChild(d3);
+      body.appendChild(d3);
     }
 
-    (data.notes || []).forEach(function (n) { card.appendChild(el("p", "note", "提示:" + n)); });
-    card.appendChild(el("p", "meta", "查询时间 " + data.checked_at + " · 元宝搜索调用 " + data.search_calls + " 次"));
+    (data.notes || []).forEach(function (n) { body.appendChild(el("p", "note", "提示：" + n)); });
+    var foot = el("div", "result-foot");
+    foot.appendChild(el("span", "meta", "查询时间 " + data.checked_at + " · 元宝搜索调用 " + data.search_calls + " 次"));
     if (data.from_cache) {
-      var cacheLine = el("p", "meta", "这是 " + data.cache_age_minutes + " 分钟前的查询结果。 ");
+      var cacheLine = el("span", "meta", "这是 " + data.cache_age_minutes + " 分钟前的查询结果。 ");
       var again = el("button", "linkish", "重新查询");
       again.type = "button";
       again.addEventListener("click", function () { start(data.question, true); });
       cacheLine.appendChild(again);
-      card.appendChild(cacheLine);
+      foot.appendChild(cacheLine);
     }
+    body.appendChild(foot);
+    card.appendChild(body);
     result.appendChild(card);
   }
 
