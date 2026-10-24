@@ -1,0 +1,14 @@
+# 排除开发/测试文件，仅保留 ClawHub 发布所需
+fixtures/
+tests/
+agents/
+skills/
+release-notes.md
+SPEC.md
+TASKS.md
+*.jsonl
+*.mp3
+*.jpeg
+*.jpg
+*.png
+*.gif
