@@ -10,3 +10,5 @@ mise.toml
 dist/
 build/
 .env
+.dev.vars*
+.wrangler/

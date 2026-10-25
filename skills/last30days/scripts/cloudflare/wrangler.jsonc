@@ -1,0 +1,22 @@
+{
+  "name": "waytoagi-detective",
+  "account_id": "071443b43c7562efec975a5e964d5a9c",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-25",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [{"pattern": "detective.ovoxin.top", "custom_domain": true}],
+  "assets": {
+    "directory": "../../dist/detective-public",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  "durable_objects": {
+    "bindings": [{"name": "JOBS", "class_name": "DetectiveJobs"}]
+  },
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["DetectiveJobs"]}],
+  "vars": {"PER_MINUTE": "6", "PER_DAY": "300", "LLM_MODEL": "deepseek-flash"},
+  "observability": {"enabled": false}
+}
