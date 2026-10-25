@@ -5,7 +5,6 @@ agents/
 skills/
 release-notes.md
 SPEC.md
-TASKS.md
 *.jsonl
 *.mp3
 *.jpeg

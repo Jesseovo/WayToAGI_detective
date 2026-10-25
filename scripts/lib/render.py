@@ -11,6 +11,7 @@ the data path used, and a dark-mode-aware HTML report.
 import json
 import os
 import tempfile
+import zlib
 from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -561,66 +562,215 @@ def _diversify_ranked(rows, limit: int, min_per_source: int = 2, relevance_floor
 
 HTML_STYLE = """
 :root {
-  --paper:#fafaf8; --ink:#0a0a0a; --muted:#666; --line:#d8d8d4; --card:#ffffff;
-  --accent:#002FA7; --accent-bright:#5B7BFF; --grey:#f0f0ee; --warn-bg:#fff4c2; --warn-line:#c18b00;
-  --sans: Inter, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
-  --mono: "JetBrains Mono", "SF Mono", Consolas, monospace;
+  --paper:#efe8d6; --paper2:#e3dac3; --paperD:#cfc4a8; --ink:#1b1815; --ink2:#3a342d;
+  --gray:#8d857a; --lgray:#bdb4a3; --red:#d42a2f; --redD:#9e1b22; --gold:#e2b23c; --cream:#f8f3e6;
+  --cork:#b98a55; --corkD:#8e6338; --dot:rgba(27,24,21,.16); --ok:#2f6b3a;
+  --serif:"Bodoni 72","Didot","Playfair Display","Songti SC","STSong","SimSun",serif;
+  --cond:Impact,"Arial Narrow Bold","Haettenschweiler","PingFang SC","Microsoft YaHei",sans-serif;
+  --type:"Courier New",Courier,"PingFang SC","Microsoft YaHei",monospace;
+  --body:"Songti SC","STSong","Noto Serif SC","SimSun",Georgia,serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --paper:#0f1115; --ink:#f2f2ee; --muted:#9a9a96; --line:#2a2d33; --card:#16191f;
-          --accent:#7f9cff; --grey:#1b1e24; --warn-bg:#3a3110; --warn-line:#d6a400; }
+  :root { --paper:#1e1b17; --paper2:#26221d; --paperD:#3a342c; --ink:#efe6d2; --ink2:#cfc4ad;
+          --gray:#9a917f; --lgray:#5a5348; --red:#e5484d; --redD:#ff7b7f; --gold:#e8bd4f; --cream:#2b2721;
+          --cork:#5a4126; --corkD:#3d2b18; --dot:rgba(239,230,210,.08); --ok:#7fc08a; }
+  .stamp { mix-blend-mode:normal; }
+  body::after { mix-blend-mode:screen; opacity:.08; }
 }
 * { box-sizing:border-box; }
-body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); }
-.page { min-height:100vh; }
-.hero { min-height:64vh; padding:48px clamp(16px,5vw,72px); display:grid; grid-template-columns:7fr 5fr; gap:40px; align-items:end; background:linear-gradient(90deg, rgba(0,47,167,.10), transparent 42%), var(--paper); }
-.kicker,.meta,.source-code,.source-state,.item-meta,.item-index,.item-score small,.footer { font-family:var(--mono); letter-spacing:.14em; text-transform:uppercase; }
-.kicker { color:var(--accent); font-weight:700; margin-bottom:24px; }
-h1 { font-size:clamp(40px,8vw,128px); line-height:.95; letter-spacing:-.02em; margin:0; font-weight:200; overflow-wrap:anywhere; }
-.hero-copy { max-width:760px; font-size:clamp(17px,2vw,26px); line-height:1.4; color:var(--muted); margin-top:28px; }
-.metrics { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; }
-.metric { border-top:2px solid var(--ink); padding-top:16px; min-height:120px; }
-.metric strong { display:block; font-size:clamp(44px,7vw,104px); line-height:.85; letter-spacing:-.04em; }
-.metric span { display:block; color:var(--muted); margin-top:12px; }
-.band { padding:32px clamp(16px,5vw,72px); background:#002FA7; color:white; display:flex; justify-content:space-between; gap:24px; flex-wrap:wrap; }
-.band strong { font-size:clamp(20px,3.4vw,48px); font-weight:300; letter-spacing:-.02em; }
-.section { padding:48px clamp(16px,5vw,72px); }
-.section-title { display:flex; justify-content:space-between; gap:24px; align-items:end; border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:24px; flex-wrap:wrap; }
-.section-title h2 { font-size:clamp(28px,4.6vw,68px); line-height:1; font-weight:250; margin:0; letter-spacing:-.02em; }
-.sources { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); }
-.source-card { background:var(--card); padding:18px; min-height:150px; display:flex; flex-direction:column; }
-.source-code,.source-state { color:var(--muted); font-size:12px; }
-.source-state.err { color:#c0392b; }
-.source-name { margin-top:14px; font-size:20px; }
-.source-count { margin-top:auto; font-size:52px; line-height:.9; font-weight:800; letter-spacing:-.04em; }
-.source-note { color:var(--muted); font-size:12px; margin-top:8px; line-height:1.45; overflow-wrap:anywhere; }
-.notice { margin:0 clamp(16px,5vw,72px); padding:16px 20px; background:var(--warn-bg); border-left:4px solid var(--warn-line); }
-.items { display:flex; flex-direction:column; border-top:1px solid var(--line); }
-.item-card { display:grid; grid-template-columns:72px minmax(0,1fr) 112px; gap:24px; padding:22px 0; border-bottom:1px solid var(--line); }
-.item-index { color:var(--accent); font-size:14px; padding-top:6px; }
-.item-meta { display:flex; gap:14px; flex-wrap:wrap; color:var(--muted); font-size:12px; margin-bottom:10px; }
-.item-main h3 { margin:0; font-size:clamp(18px,2.3vw,30px); line-height:1.25; font-weight:500; overflow-wrap:anywhere; }
-.item-main p { color:var(--muted); line-height:1.55; margin:12px 0; }
-.item-main a { color:var(--accent); overflow-wrap:anywhere; text-decoration:none; border-bottom:1px solid rgba(0,47,167,.35); }
-.item-score { text-align:right; color:var(--accent); }
-.item-score span { display:block; font-size:52px; line-height:.9; font-weight:800; letter-spacing:-.04em; }
-.footer { padding:32px clamp(16px,5vw,72px); color:var(--muted); border-top:1px solid var(--line); font-size:12px; }
-@media (max-width:900px) {
-  .hero { grid-template-columns:1fr; min-height:auto; }
-  .metrics,.sources { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .item-card { grid-template-columns:40px minmax(0,1fr); gap:14px; }
-  .item-score { grid-column:2; text-align:left; }
+html { background:var(--paper); }
+body { margin:0; color:var(--ink); font-family:var(--body); line-height:1.5;
+  background:radial-gradient(var(--dot) 1px, transparent 1.3px) 0 0/7px 7px, var(--paper); }
+body::after { content:""; position:fixed; inset:0; pointer-events:none; z-index:50; opacity:.22; mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E"); }
+a { color:inherit; }
+.page { max-width:1180px; margin:0 auto; padding:0 clamp(12px,3vw,32px) 40px; }
+
+/* EXTRA! EXTRA! ticker */
+.extra { background:var(--red); color:#f8f3e6; border-bottom:3px solid var(--ink); overflow:hidden; white-space:nowrap;
+  font-family:var(--cond); letter-spacing:.08em; font-size:15px; padding:6px 0; }
+.extra-track { display:inline-block; padding-left:100%; animation:ticker 40s linear infinite; }
+.extra-track span { margin-right:48px; }
+.extra-track b { color:#ffd25e; }
+@keyframes ticker { to { transform:translateX(-100%); } }
+
+/* Masthead */
+.masthead { text-align:center; padding:22px 0 0; }
+.mast-top,.mast-info { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  font-family:var(--type); font-size:12px; text-transform:uppercase; letter-spacing:.12em; color:var(--ink2); }
+.mast-top { border-bottom:1px solid var(--ink); padding-bottom:6px; }
+.mast-title { font-family:var(--serif); font-style:italic; font-weight:900; font-size:clamp(38px,8vw,100px);
+  line-height:.95; letter-spacing:-.01em; margin:14px 0 6px; }
+.mast-title .dot { color:var(--red); font-style:normal; }
+.mast-sub { font-family:var(--cond); font-size:clamp(12px,1.5vw,16px); letter-spacing:.32em; text-transform:uppercase; margin-bottom:10px; }
+.rule-double { border-top:4px solid var(--ink); border-bottom:1px solid var(--ink); height:8px; }
+.mast-info { padding:7px 0; border-bottom:3px solid var(--ink); }
+.mast-info b { color:var(--red); }
+
+/* Dossier hero */
+.dossier { position:relative; margin:34px 0 10px; }
+.folder-tab { display:inline-block; background:var(--gold); color:#1b1815; border:3px solid var(--ink); border-bottom:none;
+  padding:6px 22px 4px; font-family:var(--cond); letter-spacing:.18em; font-size:15px; border-radius:6px 6px 0 0; margin-left:24px; }
+.folder { position:relative; background:var(--paper2); border:3px solid var(--ink); box-shadow:8px 8px 0 var(--ink);
+  padding:clamp(18px,3vw,36px); display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); gap:28px; }
+.folder::before { content:""; position:absolute; inset:0; pointer-events:none; opacity:.6;
+  background:radial-gradient(var(--dot) 1.4px, transparent 1.8px) 0 0/9px 9px;
+  -webkit-mask-image:linear-gradient(120deg, transparent 40%, #000); mask-image:linear-gradient(120deg, transparent 40%, #000); }
+.subject { position:relative; z-index:1; }
+.file-label { font-family:var(--type); font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--redD); font-weight:700; }
+.dossier h1 { font-family:var(--serif); font-weight:900; font-size:clamp(34px,6.2vw,80px); line-height:1.04; margin:10px 0 14px; overflow-wrap:anywhere; }
+.redact { display:inline-block; background:var(--ink); height:.36em; width:2.4em; vertical-align:middle; margin-left:.25em; }
+.lede { font-size:clamp(15px,1.6vw,19px); color:var(--ink2); max-width:640px; margin:0; }
+.lede::first-letter { font-family:var(--serif); font-weight:900; font-size:3em; float:left; line-height:.85; margin:4px 8px 0 0; color:var(--red); }
+.fields { position:relative; z-index:1; display:grid; grid-template-columns:1fr 1fr; border:3px solid var(--ink); background:var(--cream); align-self:end; }
+.field { padding:12px 14px; border-right:1px dashed var(--ink); border-bottom:1px dashed var(--ink); }
+.field:nth-child(2n) { border-right:none; }
+.field:nth-last-child(-n+2) { border-bottom:none; }
+.field small { display:block; font-family:var(--type); font-size:11px; letter-spacing:.1em; color:var(--gray); text-transform:uppercase; }
+.field strong { display:block; font-family:var(--cond); font-weight:400; font-size:clamp(30px,4.4vw,52px); line-height:1; margin-top:4px; }
+.field.hot strong { color:var(--red); }
+.stamp { position:absolute; z-index:3; top:-26px; right:26px; transform:rotate(-12deg);
+  border:5px double var(--red); color:var(--red); background:rgba(212,42,47,.04); padding:8px 16px; font-family:var(--cond);
+  font-size:clamp(20px,2.6vw,30px); letter-spacing:.14em; text-align:center; line-height:1.05; opacity:.88;
+  mix-blend-mode:multiply; border-radius:4px; animation:slam .55s cubic-bezier(.2,1.6,.4,1) .35s both; }
+.stamp small { display:block; font-family:var(--type); font-size:11px; letter-spacing:.2em; }
+@keyframes slam { 0% { opacity:0; transform:rotate(-24deg) scale(3); } 70% { opacity:.95; transform:rotate(-10deg) scale(.92); } 100% { opacity:.88; transform:rotate(-12deg) scale(1); } }
+.clip { position:absolute; top:-16px; left:46%; width:22px; height:58px; border:3px solid var(--gray); border-radius:12px; z-index:4; }
+.dateline { display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; margin:22px 0 0; padding:10px 0;
+  border-top:3px solid var(--ink); border-bottom:1px solid var(--ink); font-family:var(--type); font-size:13px; }
+.dateline b { font-family:var(--cond); font-weight:400; letter-spacing:.06em; font-size:16px; }
+
+/* Detective note */
+.notice { position:relative; margin:26px auto 0; max-width:640px; background:#f7e27a; color:#1b1815; padding:16px 20px 14px 22px;
+  font-family:var(--type); font-size:14px; border:2px solid var(--ink); box-shadow:5px 5px 0 var(--ink); transform:rotate(-1deg); }
+.notice b { font-family:var(--cond); font-weight:400; letter-spacing:.1em; color:#9e1b22; margin-right:8px; }
+
+/* Section headers */
+.section { margin-top:46px; }
+.sec-head { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; border-top:4px solid var(--ink); border-bottom:1px solid var(--ink);
+  padding:8px 0 6px; margin-bottom:22px; }
+.sec-head h2 { margin:0; font-family:var(--serif); font-style:italic; font-weight:900; font-size:clamp(26px,3.8vw,44px); line-height:1.05; }
+.sec-no { background:var(--ink); color:var(--paper); font-family:var(--cond); letter-spacing:.12em; padding:3px 10px; font-size:14px; }
+.sec-head .meta { margin-left:auto; font-family:var(--type); font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--gray); }
+
+/* Corkboard with red string */
+.corkboard { position:relative; border:3px solid var(--ink); box-shadow:8px 8px 0 var(--ink); padding:40px clamp(18px,3vw,40px) 30px;
+  background:radial-gradient(rgba(0,0,0,.2) 1px, transparent 1.6px) 0 0/5px 5px,
+    radial-gradient(rgba(255,255,255,.14) 1px, transparent 1.6px) 2px 3px/7px 7px, var(--cork);
+  outline:10px solid var(--corkD); outline-offset:-13px; overflow:hidden; }
+.leads { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:38px 34px; }
+.lead { position:relative; background:#f8f3e6; color:#1b1815; border:2px solid #1b1815; padding:22px 16px 14px; box-shadow:4px 5px 0 rgba(0,0,0,.45); }
+.lead:nth-child(3n+1) { transform:rotate(-1.6deg); }
+.lead:nth-child(3n+2) { transform:rotate(1.2deg); }
+.lead:nth-child(3n) { transform:rotate(-.6deg); }
+.lead::before { content:""; position:absolute; top:-9px; left:50%; width:18px; height:18px; margin-left:-9px; border-radius:50%;
+  background:radial-gradient(circle at 35% 35%, #ff9a9a, #d42a2f 45%, #9e1b22); border:2px solid #1b1815; z-index:3; }
+.lead::after { content:""; position:absolute; top:0; left:50%; width:calc(100% + 34px); height:3px; background:#d42a2f;
+  transform-origin:0 50%; transform:rotate(8deg); box-shadow:0 2px 1px rgba(0,0,0,.35); z-index:2; pointer-events:none; }
+.lead:last-child::after { display:none; }
+.lead-tag { font-family:var(--type); font-size:11px; letter-spacing:.14em; color:#9e1b22; text-transform:uppercase; }
+.lead h3 { font-family:var(--body); font-size:17px; line-height:1.35; margin:6px 0 10px; overflow-wrap:anywhere; }
+.lead-src { font-family:var(--type); font-size:12px; color:#3a342d; }
+.lead-meta { display:flex; justify-content:space-between; align-items:end; gap:10px; margin-top:10px; border-top:1px dashed #1b1815; padding-top:8px; }
+.lead-meta strong { font-family:var(--cond); font-weight:400; font-size:30px; line-height:1; color:#d42a2f; }
+.lead a { display:block; margin-top:8px; font-family:var(--type); font-size:12px; color:#9e1b22; overflow-wrap:anywhere; }
+
+/* Informant reports + evidence tags */
+.report-block { margin-bottom:36px; }
+.report-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px; font-family:var(--type); font-size:13px; }
+.report-head h3 { margin:0; font-family:var(--cond); font-weight:400; font-size:24px; letter-spacing:.06em; }
+.report-head .code { border:2px solid var(--ink); padding:1px 8px; font-family:var(--cond); letter-spacing:.14em; }
+.report-head .line { flex:1; min-width:40px; border-top:2px dashed var(--ink); }
+.evidence { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:22px; }
+.tag { position:relative; background:var(--cream); border:3px solid var(--ink); box-shadow:6px 6px 0 var(--ink);
+  padding:18px 18px 16px 44px; display:flex; flex-direction:column; transition:transform .15s; }
+.tag:nth-child(odd) { transform:rotate(-.5deg); } .tag:nth-child(even) { transform:rotate(.45deg); }
+.tag:hover { transform:translate(-2px,-2px); }
+.tag::before { content:""; position:absolute; left:11px; top:20px; width:14px; height:14px; border-radius:50%;
+  background:var(--paper); border:3px solid var(--ink); box-shadow:inset 0 0 0 2px var(--gold); }
+.tag::after { content:""; position:absolute; left:0; top:0; bottom:0; width:6px; background:var(--red); }
+.tag-top { display:flex; justify-content:space-between; align-items:start; gap:10px; }
+.tag-no { font-family:var(--cond); font-size:22px; letter-spacing:.06em; line-height:1; }
+.tag-no small { display:block; font-family:var(--type); font-size:10px; letter-spacing:.18em; color:var(--gray); margin-bottom:3px; }
+.suspect { text-align:right; font-family:var(--type); font-size:10px; letter-spacing:.14em; color:var(--gray); }
+.suspect b { display:block; font-family:var(--cond); font-weight:400; font-size:36px; line-height:.9; color:var(--red); letter-spacing:0; }
+.tag-meta { display:flex; gap:6px 14px; flex-wrap:wrap; margin:10px 0 8px; font-family:var(--type); font-size:12px; color:var(--ink2); }
+.tag h4 { margin:0; font-size:17px; line-height:1.42; font-weight:700; overflow-wrap:anywhere; }
+.memo { margin:10px 0 0; font-family:var(--type); font-size:12.5px; color:var(--ink2); border-left:3px solid var(--gold); padding-left:8px; }
+.memo b { color:var(--redD); }
+.heat { margin-top:12px; display:flex; align-items:center; gap:10px; font-family:var(--type); font-size:12px; }
+.heat-label { font-family:var(--cond); letter-spacing:.1em; background:var(--ink); color:var(--paper); padding:1px 6px; white-space:nowrap; }
+.heat-bar { flex:1; height:10px; border:2px solid var(--ink); background:var(--paper2); min-width:50px; }
+.heat-bar i { display:block; height:100%; background:repeating-linear-gradient(90deg, var(--red) 0 5px, var(--redD) 5px 7px); }
+.heat-text { margin-top:4px; font-family:var(--type); font-size:11.5px; color:var(--gray); overflow-wrap:anywhere; }
+.tag a { margin-top:auto; padding-top:12px; font-family:var(--type); font-size:12px; color:var(--redD); overflow-wrap:anywhere; text-decoration:none; }
+.tag a:hover,.tag a:focus-visible { text-decoration:underline; }
+.empty-case { border:3px dashed var(--ink); padding:28px; text-align:center; font-family:var(--type); }
+
+/* Informant roster */
+.roster { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:16px; }
+.mug { position:relative; background:var(--cream); border:3px solid var(--ink); box-shadow:5px 5px 0 var(--ink); padding:12px 14px; min-height:132px; display:flex; flex-direction:column; }
+.mug.error,.mug.timeout { background:repeating-linear-gradient(-45deg, var(--cream) 0 10px, var(--paper2) 10px 20px); }
+.mug-code { font-family:var(--cond); letter-spacing:.14em; font-size:13px; background:var(--ink); color:var(--paper); align-self:flex-start; padding:2px 8px; }
+.mug-name { font-family:var(--serif); font-weight:900; font-size:22px; margin-top:8px; }
+.mug-count { margin-top:auto; font-family:var(--cond); font-size:44px; line-height:.9; }
+.mug-count small { font-family:var(--type); font-size:11px; letter-spacing:.1em; margin-left:6px; color:var(--gray); }
+.mug-state { position:absolute; right:8px; bottom:12px; transform:rotate(-8deg); border:2px solid currentColor; padding:1px 6px;
+  font-family:var(--cond); font-size:13px; letter-spacing:.1em; }
+.ok { --st:var(--ok); } .empty { --st:var(--gray); } .error,.timeout { --st:var(--red); }
+.mug-state,.log-state { color:var(--st); }
+
+/* Investigation log */
+.log { border:3px solid var(--ink); background:var(--cream); box-shadow:6px 6px 0 var(--ink); font-family:var(--type); font-size:13px; }
+.log-row { display:grid; grid-template-columns:76px 120px 100px 80px minmax(0,1fr); gap:10px; padding:9px 14px; border-bottom:1px dashed var(--ink); align-items:center; }
+.log-row:last-child { border-bottom:none; }
+.log-row.head { background:var(--ink); color:var(--paper); font-family:var(--cond); letter-spacing:.12em; }
+.log-state { font-family:var(--cond); letter-spacing:.08em; }
+.log-note { color:var(--ink2); overflow-wrap:anywhere; }
+
+.colophon { max-width:1180px; margin:0 auto; padding:18px clamp(12px,3vw,32px) 36px; font-family:var(--type); font-size:12px; color:var(--gray); text-align:center; }
+.colophon .rule-double { margin-bottom:12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .stamp,.extra-track { animation:none; }
+  .extra-track { padding-left:0; }
+  .tag { transition:none; }
+}
+@media (max-width:820px) {
+  .folder { grid-template-columns:1fr; }
+  .stamp { right:10px; }
+  .log-row { grid-template-columns:64px 1fr 90px; }
+  .log-row .log-count,.log-row .log-note { grid-column:2 / -1; }
+  .log-row.head .log-count,.log-row.head .log-note { display:none; }
 }
 @media print {
-  .hero { min-height:auto; }
-  .item-card { break-inside:avoid; }
-  a { color:var(--ink); }
+  body::after,.extra { display:none; }
+  .stamp { animation:none; }
+  .folder,.tag,.mug,.log,.corkboard { box-shadow:none; }
+  .tag,.lead { break-inside:avoid; transform:none !important; }
 }
 """
 
+_LOG_STATE_TEXT = {"ok": "已取证", "empty": "无线索", "error": "线人失联", "timeout": "线人失联"}
+
+
+def _case_number(topic: str) -> str:
+    """Stable 5-digit case number derived from the topic."""
+    return f"{zlib.crc32((topic or '').encode('utf-8')) % 100000:05d}"
+
+
+def _source_state(report: schema.Report, source: str, statuses: Dict[str, Any]) -> str:
+    if _items(report, source):
+        return "ok"
+    if (statuses.get(source) or {}).get("state") == "timeout":
+        return "timeout"
+    if _err(report, f"{source}_error"):
+        return "error"
+    return "empty"
+
 
 def render_html_report(report: schema.Report) -> str:
-    """Render a Guizang-inspired Swiss/IKB HTML report."""
+    """Render the research report as a newsprint detective "case file"."""
     ranked = _collect_ranked_items(report)
     meta = _source_meta()
     total = sum(len(_items(report, source)) for source in meta)
@@ -630,27 +780,48 @@ def render_html_report(report: schema.Report) -> str:
     freshness = _assess_data_freshness(report)
     generated = escape(report.generated_at[:19].replace("T", " "))
     statuses = getattr(report, "source_status", None) or {}
+    clusters = getattr(report, "clusters", None) or []
+    case_no = _case_number(report.topic)
+    topic = escape(report.topic)
+    range_from = escape(report.range_from)
+    range_to = escape(report.range_to)
 
-    source_cards = []
+    # 线人名册 + 调查日志
+    roster_cards = []
+    log_rows = []
     for source in shown_sources:
         cn, code = meta[source]
         count = len(_items(report, source))
         err = _err(report, f"{source}_error")
-        status = statuses.get(source, {})
-        state = "ERROR" if (err and not count) else ("ACTIVE" if count else "EMPTY")
-        note = ""
-        if err and not count:
-            short = str(err) if len(str(err)) <= 60 else str(err)[:58] + "…"
-            note = f'<div class="source-note" title="{escape(str(err), quote=True)}">{escape(short)}</div>'
-        elif status.get("via"):
-            note = f'<div class="source-note">{escape(", ".join(status["via"].keys()))}</div>'
-        source_cards.append(
-            f'<div class="source-card"><div class="source-code">{escape(code)}</div>'
-            f'<div class="source-name">{escape(cn)}</div><div class="source-count">{count}</div>'
-            f'<div class="source-state{" err" if state == "ERROR" else ""}">{escape(state)}</div>{note}</div>'
+        status = statuses.get(source, {}) or {}
+        state = _source_state(report, source, statuses)
+        state_text = _LOG_STATE_TEXT[state]
+        roster_cards.append(
+            f'<div class="mug {state}"><span class="mug-code">{escape(code)}</span>'
+            f'<div class="mug-name">{escape(cn)}</div>'
+            f'<div class="mug-count">{count}<small>件证物</small></div>'
+            f'<span class="mug-state">{state_text}</span></div>'
+        )
+        if state in ("error", "timeout") and err:
+            short = str(err) if len(str(err)) <= 80 else str(err)[:78] + "…"
+            note = f'<span title="{escape(str(err), quote=True)}">{escape(short)}</span>'
+        elif state == "timeout":
+            note = "线人超时未回报"
+        elif state == "empty":
+            note = "检索成功，时间窗内无相关线索"
+        else:
+            note = escape(_via_text(status).strip("（）"))
+        elapsed = status.get("elapsed")
+        timing = f" · {elapsed:.0f}s" if isinstance(elapsed, (int, float)) and elapsed >= 1 else ""
+        log_rows.append(
+            f'<div class="log-row {state}"><span>{escape(code)}</span><span>{escape(cn)}</span>'
+            f'<span class="log-state">{state_text}</span>'
+            f'<span class="log-count">{count} 件{timing}</span><span class="log-note">{note}</span></div>'
         )
 
-    item_cards = []
+    # 证物：按线人（平台）分组，编号沿用全局排名
+    max_heat = max([_engagement_total(item) for _, item in ranked] or [0])
+    grouped: Dict[str, List[str]] = {}
     for idx, (source, item) in enumerate(ranked, start=1):
         cn, code = meta[source]
         text = _plain_text(item)
@@ -661,50 +832,80 @@ def render_html_report(report: schema.Report) -> str:
         reason = getattr(item, "why_relevant", "") or ""
         eng = format_engagement(source, getattr(item, "engagement", None)).strip(" []")
         url = getattr(item, "url", "") or "#"
-        item_cards.append(
-            '<article class="item-card">'
-            f'<div class="item-index">{idx:02d}</div>'
-            '<div class="item-main">'
-            f'<div class="item-meta"><span>{escape(code)}</span><span>{escape(date)}</span>'
-            f'<span>{escape(author)}</span>{f"<span>{escape(eng)}</span>" if eng else ""}</div>'
-            f'<h3>{escape(snippet or url)}</h3>'
-            f'<p>{escape(reason)}</p>'
-            f'<a href="{escape(_safe_href(url), quote=True)}" target="_blank" rel="noopener noreferrer">{escape(url)}</a>'
+        heat = _engagement_total(item)
+        pct = max(4, int(round(100 * heat / max_heat))) if heat and max_heat else 0
+        memo = f'<p class="memo"><b>侦探批注：</b>{escape(reason)}</p>' if reason else ""
+        witness = f"<span>目击者 {escape(author)}</span>" if author else ""
+        heat_text = f'<div class="heat-text">{escape(eng)}</div>' if eng else ""
+        grouped.setdefault(source, []).append(
+            '<article class="tag">'
+            '<div class="tag-top">'
+            f'<div class="tag-no"><small>EVIDENCE</small>证物 #{idx:02d}</div>'
+            f'<div class="suspect">嫌疑分<b>{escape(str(score_value))}</b></div>'
             '</div>'
-            f'<div class="item-score"><span>{score_value}</span><small>SCORE</small></div>'
+            f'<div class="tag-meta"><span>{escape(code)}</span><span>{escape(date)}</span>{witness}</div>'
+            f'<h4>{escape(snippet or url)}</h4>'
+            f'{memo}'
+            f'<div class="heat"><span class="heat-label">热度指数</span>'
+            f'<span class="heat-bar" aria-hidden="true"><i style="width:{pct}%"></i></span>'
+            f'<span>{_fmt_number(heat) if heat else "—"}</span></div>'
+            f'{heat_text}'
+            f'<a href="{escape(_safe_href(url), quote=True)}" target="_blank" rel="noopener noreferrer">调取原始证据 → {escape(url)}</a>'
             '</article>'
         )
 
-    source_summary = ", ".join(f"{meta[s][0]} {n}" for s, n in active_sources) or "暂无可用来源"
+    report_blocks = []
+    for source, cards in grouped.items():
+        cn, code = meta[source]
+        report_blocks.append(
+            '<div class="report-block">'
+            f'<div class="report-head"><span class="code">{escape(code)}</span><h3>线人报告 · {escape(cn)}</h3>'
+            f'<span class="line"></span><span>呈交 {len(cards)} 件证物</span></div>'
+            f'<div class="evidence">{"".join(cards)}</div>'
+            '</div>'
+        )
+    evidence_html = "".join(report_blocks) or '<div class="empty-case">现场一片空白：本案暂未搜集到任何证物。</div>'
+
+    source_summary = "、".join(f"{meta[s][0]} {n}" for s, n in active_sources) or "暂无线人回报"
     sparse_note = ""
     if freshness["is_sparse"]:
-        sparse_note = '<div class="notice">近期可确认数据较少，请在最终分析中明确说明时效性和覆盖限制。</div>'
+        sparse_note = ('<div class="notice"><b>侦探手记</b>近期可确认的证据较少，'
+                       '请在最终分析中明确说明时效性和覆盖限制。</div>')
 
     cluster_section = ""
-    clusters = getattr(report, "clusters", None) or []
     if clusters:
-        cluster_rows = []
-        for c in clusters[:8]:
+        leads = []
+        for n, c in enumerate(clusters[:8], start=1):
             c_sources = "、".join(c.get("sources", []))
             c_title = c.get("representative_title", "") or "(无标题)"
             c_url = c.get("representative_url", "") or ""
-            cluster_rows.append(
-                '<article class="item-card">'
-                f'<div class="item-index">×{c.get("size", 0)}</div>'
-                '<div class="item-main">'
-                f'<div class="item-meta"><span>{escape(c_sources)}</span></div>'
+            link = (f'<a href="{escape(_safe_href(c_url), quote=True)}" target="_blank" '
+                    f'rel="noopener noreferrer">{escape(c_url)}</a>') if c_url else ""
+            leads.append(
+                '<li class="lead">'
+                f'<div class="lead-tag">LEAD #{n:02d} · 关联 ×{escape(str(c.get("size", 0)))}</div>'
                 f'<h3>{escape(c_title)}</h3>'
-                f'<a href="{escape(_safe_href(c_url), quote=True)}" target="_blank" rel="noopener noreferrer">{escape(c_url)}</a>'
-                '</div>'
-                f'<div class="item-score"><span>{len(c.get("sources", []))}</span><small>PLATFORMS</small></div>'
-                '</article>'
+                f'<div class="lead-src">交叉印证：{escape(c_sources)}</div>'
+                f'<div class="lead-meta"><span class="lead-src">涉及平台</span><strong>{len(c.get("sources", []))}</strong></div>'
+                f'{link}'
+                '</li>'
             )
         cluster_section = (
             '<section class="section">'
-            '<div class="section-title"><h2>跨平台聚合热点</h2><div class="meta">cross-source clusters</div></div>'
-            f'<div class="items">{"".join(cluster_rows)}</div>'
+            '<div class="sec-head"><span class="sec-no">FILE 02</span><h2>关联线索</h2>'
+            '<span class="meta">cross-source leads · red string board</span></div>'
+            f'<div class="corkboard"><ul class="leads">{"".join(leads)}</ul></div>'
             '</section>'
         )
+
+    ticker = "".join([
+        f"<span><b>EXTRA! EXTRA!</b> 侦探日报号外：「{topic}」调查档案公开</span>",
+        f"<span>证物 {total} 件 · 线人 {len(active_sources)} 名回报</span>",
+        f"<span>最高嫌疑分 <b>{escape(str(top_score))}</b></span>",
+        f"<span>关联线索 {len(clusters)} 条</span>",
+        f"<span>调查期间 {range_from} — {range_to}</span>",
+    ]) * 2
+    version = escape(DISPLAY_VERSION)
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -712,36 +913,57 @@ def render_html_report(report: schema.Report) -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>{escape(report.topic)} - last30days-cn</title>
+<title>调查档案 · {topic} - last30days-cn</title>
 <style>{HTML_STYLE}</style>
 </head>
 <body>
+<div class="extra" aria-hidden="true"><div class="extra-track">{ticker}</div></div>
 <main class="page">
-  <section class="hero">
-    <div>
-      <div class="kicker">LAST30DAYS-CN / GUIZANG SWISS REPORT</div>
-      <h1>{escape(report.topic)}</h1>
-      <p class="hero-copy">覆盖 {escape(report.range_from)} 至 {escape(report.range_to)} 的平台讨论。视觉样式参考 guizang-ppt-skill 的 Swiss/IKB 报告语言，适合直接浏览、归档或打印。</p>
+  <header class="masthead">
+    <div class="mast-top"><span>Vol. {version}</span><span>北京时间 · Beijing Edition</span><span>Price ¥0.00</span></div>
+    <div class="mast-title">侦探日报 <span class="dot">·</span> THE DAILY CLUE</div>
+    <div class="mast-sub">All the clues fit to print</div>
+    <div class="rule-double"></div>
+    <div class="mast-info"><span>CASE No. <b>{case_no}</b></span><span>Late Edition · {generated}</span><span>调查期间 {range_from} — {range_to}</span></div>
+  </header>
+
+  <section class="dossier">
+    <span class="folder-tab">CASE FILE · 调查档案</span>
+    <div class="folder">
+      <span class="clip" aria-hidden="true"></span>
+      <div class="stamp" role="img" aria-label="机密 · 已结案">机密 · 已结案<small>CLASSIFIED · CLOSED</small></div>
+      <div class="subject">
+        <div class="file-label">FILE 01 · 调查对象 / SUBJECT</div>
+        <h1>{topic}<span class="redact" aria-hidden="true"></span></h1>
+        <p class="lede">本档案汇总 {range_from} 至 {range_to} 期间各平台线人的回报。证物按相关性、时效与热度排序，跨平台关联线索已钉上软木板，可直接浏览、归档或打印。</p>
+      </div>
+      <div class="fields">
+        <div class="field"><small>证物总数 / Evidence</small><strong>{total}</strong></div>
+        <div class="field"><small>线人回报 / Informants</small><strong>{len(active_sources)}</strong></div>
+        <div class="field hot"><small>最高嫌疑分 / Top score</small><strong>{escape(str(top_score))}</strong></div>
+        <div class="field"><small>时间窗内可确认 / In window</small><strong>{freshness["total_recent"]}</strong></div>
+      </div>
     </div>
-    <div class="metrics">
-      <div class="metric"><strong>{total}</strong><span>归一化结果</span></div>
-      <div class="metric"><strong>{len(active_sources)}</strong><span>有结果的平台</span></div>
-      <div class="metric"><strong>{top_score}</strong><span>最高综合分</span></div>
-      <div class="metric"><strong>{freshness["total_recent"]}</strong><span>时间窗内可确认</span></div>
-    </div>
+    <div class="dateline"><b>线人回报汇总</b><span>{escape(source_summary)}</span></div>
   </section>
-  <section class="band"><strong>{escape(source_summary)}</strong><div class="meta">generated {generated}</div></section>
   {sparse_note}
   {cluster_section}
   <section class="section">
-    <div class="section-title"><h2>平台覆盖</h2><div class="meta">source matrix</div></div>
-    <div class="sources">{''.join(source_cards)}</div>
+    <div class="sec-head"><span class="sec-no">FILE 03</span><h2>证物陈列</h2><span class="meta">informant reports · ranked evidence</span></div>
+    {evidence_html}
   </section>
   <section class="section">
-    <div class="section-title"><h2>高分结果</h2><div class="meta">ranked evidence</div></div>
-    <div class="items">{''.join(item_cards) if item_cards else '<p>暂无结果。</p>'}</div>
+    <div class="sec-head"><span class="sec-no">FILE 04</span><h2>线人名册</h2><span class="meta">informant roster</span></div>
+    <div class="roster">{''.join(roster_cards)}</div>
+  </section>
+  <section class="section">
+    <div class="sec-head"><span class="sec-no">FILE 05</span><h2>调查日志</h2><span class="meta">investigation log</span></div>
+    <div class="log">
+      <div class="log-row head"><span>代号</span><span>线人</span><span>状态</span><span class="log-count">证物</span><span class="log-note">取证路径 / 备注</span></div>
+      {''.join(log_rows)}
+    </div>
   </section>
 </main>
-<footer class="footer">last30days-cn v{DISPLAY_VERSION} · HTML renderer inspired by op7418/guizang-ppt-skill · Generated locally.</footer>
+<footer class="colophon"><div class="rule-double"></div>侦探日报 THE DAILY CLUE · last30days-cn v{version} · CASE No. {case_no} · 本档案于本地生成，证据链接均指向原始出处。</footer>
 </body>
 </html>"""

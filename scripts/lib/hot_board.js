@@ -26,7 +26,7 @@
   function closePicker(restoreFocus) {
     sourcePicker.hidden = true;
     sourceToggle.setAttribute('aria-expanded', 'false');
-    document.getElementById('source-toggle-label').textContent = '切换平台';
+    document.getElementById('source-toggle-label').textContent = '切换线人';
     if (restoreFocus) sourceToggle.focus({ preventScroll: true });
   }
 
@@ -81,8 +81,8 @@
       board.style.setProperty('--preview-rows', String(Math.min(count, limit)));
       var opener = board.querySelector('.board-open');
       if (opener) {
-        opener.querySelector('span').textContent = value ? '查看 ' + count + ' 条匹配' : '查看全部 ' + rows.length + ' 条';
-        opener.setAttribute('aria-label', '查看' + board.querySelector('h3').textContent + (value ? '的' + count + '条匹配' : '完整榜单'));
+        opener.querySelector('span').textContent = value ? '调阅 ' + count + ' 条匹配' : '调阅全部 ' + rows.length + ' 条';
+        opener.setAttribute('aria-label', '调阅' + board.querySelector('h3').textContent + (value ? '的' + count + '条匹配' : '完整卷宗'));
       }
       var counter = board.querySelector('.board-count');
       if (rows.length) counter.textContent = value ? count + ' 条匹配' : rows.length + ' 条';
@@ -111,9 +111,9 @@
       topicToggle.setAttribute('aria-expanded', String(expandedTopics));
       topicToggle.querySelector('span').textContent = expandedTopics ? '收起' : '查看全部 ' + visibleTopics + ' 个';
     }
-    summary.textContent = value ? matchingItems + ' 条匹配 · ' + visibleBoards + ' 个榜单' : mobile ? visibleBoards + ' 个来源' : visibleBoards + ' 个榜单 · 先看前 ' + limit + ' 条';
+    summary.textContent = value ? '搜出 ' + matchingItems + ' 条线索 · ' + visibleBoards + ' 份报告' : mobile ? visibleBoards + ' 路线人' : visibleBoards + ' 份报告 · 先看前 ' + limit + ' 条';
     sourceNav.hidden = !available.length;
-    document.getElementById('source-picker-count').textContent = available.length + ' 个来源';
+    document.getElementById('source-picker-count').textContent = available.length + ' 路线人';
     sourceCurrent.textContent = '';
     if (activeBoard >= 0) {
       var selected = sourceTabs[activeBoard];
@@ -185,7 +185,7 @@
       icon.textContent = '';
       icon.appendChild(board.querySelector('.platform-icon').cloneNode(true));
       document.getElementById('reader-title').textContent = board.querySelector('h3').textContent;
-      document.getElementById('reader-context').textContent = value ? '关键词「' + query.value.trim() + '」 · ' + rows.length + ' 条匹配' : '本次快照共 ' + rows.length + ' 条 · 按来源排名排列';
+      document.getElementById('reader-context').textContent = value ? '搜查「' + query.value.trim() + '」 · ' + rows.length + ' 条匹配' : '本次快照共 ' + rows.length + ' 条线报 · 按来源排名排列';
       reader.showModal();
       readerList.scrollTop = 0;
       root.classList.add('reader-open');
@@ -210,8 +210,9 @@
     return root.getAttribute('data-theme') === 'dark' || (!root.hasAttribute('data-theme') && systemTheme.matches);
   }
   function themeLabel() {
-    themeButton.setAttribute('aria-label', dark() ? '切换至浅色主题' : '切换至深色主题');
+    themeButton.setAttribute('aria-label', dark() ? '切换至日班（浅色主题）' : '切换至夜班（深色主题）');
     themeButton.title = themeButton.getAttribute('aria-label');
+    document.getElementById('theme-label').textContent = dark() ? '日班' : '夜班';
   }
   themeButton.addEventListener('click', function () {
     var theme = dark() ? 'light' : 'dark';
@@ -245,6 +246,108 @@
     if (event.key === 'Escape') { event.preventDefault(); dismissStar(); }
   });
   if (!starDismissed) window.setTimeout(showStar, 12000);
+  // --- Case-solving game: investigated links, clue points and detective rank. ---
+  var GAME_KEY = 'last30days-hot-casebook';
+  var RANKS = [[0, '实习侦探'], [60, '见习侦探'], [180, '正式侦探'], [400, '资深侦探'], [800, '名侦探'], [1500, '神探']];
+  var edition = (document.querySelector('.mast-rule time') || {}).textContent || '';
+  var motion = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var book = { edition: edition, seen: {}, points: 0 };
+  try {
+    var saved = JSON.parse(localStorage.getItem(GAME_KEY) || 'null');
+    if (saved && typeof saved === 'object') {
+      book.points = Math.max(0, Number(saved.points) || 0);
+      // Investigations reset with each new edition; the career score carries over.
+      if (saved.edition === edition && saved.seen && typeof saved.seen === 'object') book.seen = saved.seen;
+    }
+  } catch (e) { /* Corrupt or blocked storage starts a fresh casebook. */ }
+  function saveBook() {
+    try { localStorage.setItem(GAME_KEY, JSON.stringify(book)); } catch (e) { /* Play continues for this visit. */ }
+  }
+  function storyKey(anchor) { return 's:' + anchor.getAttribute('href') + '|' + (anchor.getAttribute('title') || ''); }
+  function topicKey(topic) { return 'c:' + (topic.querySelector('a.t').getAttribute('title') || ''); }
+  var hudPoints = document.getElementById('hud-points');
+  var hudRank = document.getElementById('hud-rank');
+  var hudFill = document.getElementById('hud-fill');
+  var hudBar = document.getElementById('hud-bar');
+  var hudCount = document.getElementById('hud-count');
+  var hudNext = document.getElementById('hud-next');
+  var caseStatus = document.getElementById('case-status');
+  var toast = document.getElementById('clue-toast');
+  var storyLinks = Array.from(document.querySelectorAll('.board .story'));
+  function rankFor(points) {
+    var current = RANKS[0], next = null;
+    RANKS.forEach(function (r, i) { if (points >= r[0]) { current = r; next = RANKS[i + 1] || null; } });
+    return { name: current[1], next: next };
+  }
+  function paintSeen() {
+    topics.forEach(function (topic) { topic.classList.toggle('is-solved', !!book.seen[topicKey(topic)]); });
+    storyLinks.forEach(function (a) { a.parentNode.classList.toggle('is-read', !!book.seen[storyKey(a)]); });
+  }
+  function paintHud() {
+    var useCases = topics.length > 0;
+    var pool = useCases ? topics.map(topicKey) : storyLinks.map(storyKey);
+    var done = pool.filter(function (k) { return book.seen[k]; }).length;
+    var pct = pool.length ? Math.round(done * 100 / pool.length) : 0;
+    var rank = rankFor(book.points);
+    hudPoints.textContent = String(book.points);
+    hudRank.textContent = rank.name;
+    hudFill.style.width = pct + '%';
+    hudBar.setAttribute('aria-valuenow', String(pct));
+    hudCount.textContent = (useCases ? '悬案 ' : '线报 ') + done + ' / ' + pool.length;
+    hudNext.textContent = pool.length && pct === 100 ? '本期悬案全部告破，干得漂亮。' : rank.next ? '再得 ' + (rank.next[0] - book.points) + ' 分晋升「' + rank.next[1] + '」' : '你已是神探，继续巡查吧。';
+  }
+  function popToast(text, anchor) {
+    toast.textContent = text;
+    toast.hidden = false;
+    var rect = anchor.getBoundingClientRect();
+    toast.style.left = Math.max(12, Math.min(window.innerWidth - 160, rect.left + rect.width / 2 - 60)) + 'px';
+    toast.style.top = Math.max(12, rect.top - 12) + 'px';
+    toast.classList.remove('is-pop');
+    void toast.offsetWidth;
+    toast.classList.add('is-pop');
+    window.clearTimeout(popToast.timer);
+    popToast.timer = window.setTimeout(function () { toast.hidden = true; }, motion ? 1100 : 1800);
+  }
+  function award(key, points, message, anchor, slamNode) {
+    if (book.seen[key]) return;
+    var before = rankFor(book.points).name;
+    book.seen[key] = 1;
+    book.points += points;
+    saveBook();
+    paintSeen();
+    paintHud();
+    var after = rankFor(book.points).name;
+    var promoted = after !== before ? '晋升「' + after + '」！' : '';
+    caseStatus.textContent = message + '，线索积分 +' + points + '。' + promoted;
+    popToast('+' + points + ' 线索' + (promoted ? ' · ' + after : ''), anchor);
+    if (slamNode) {
+      slamNode.classList.remove('just-solved');
+      void slamNode.offsetWidth;
+      slamNode.classList.add('just-solved');
+    }
+  }
+  function investigate(event) {
+    if (event.type === 'auxclick' && event.button !== 1) return;
+    var anchor = event.target.closest && event.target.closest('a');
+    if (!anchor) return;
+    var topic = anchor.closest('.topic');
+    if (topic) {
+      var count = Number(topic.getAttribute('data-count')) || 2;
+      award(topicKey(topic), 20 + count * 10, '悬案已调查', anchor, topic);
+      return;
+    }
+    if (anchor.classList.contains('story')) {
+      var row = anchor.parentNode;
+      // Clones in the reader dialog mirror the stamp of their source row.
+      if (row.closest('.reader-list')) row.classList.add('is-read');
+      award(storyKey(anchor), 10, '线报已调查', anchor, row);
+    }
+  }
+  document.addEventListener('click', investigate);
+  document.addEventListener('auxclick', investigate);
+  paintSeen();
+  paintHud();
+
   themeLabel();
   update();
   root.classList.add('enhanced');
