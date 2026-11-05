@@ -18,7 +18,17 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.9", "3.12"]
         extras: [none, jieba]
+        exclude:
+          # Python 3.9 has no setup-python build for Ubuntu 26.04 (ubuntu-latest).
+          - os: ubuntu-latest
+            python-version: "3.9"
         include:
+          - os: ubuntu-22.04
+            python-version: "3.9"
+            extras: none
+          - os: ubuntu-22.04
+            python-version: "3.9"
+            extras: jieba
           # Old macOS (Catalina) ships Python 3.8 as /usr/bin/python3 (issue #13).
           - os: ubuntu-22.04
             python-version: "3.8"
